@@ -1,0 +1,33 @@
+Fix CDP mouse event screen coordinates: use real screen space
+
+CDP-dispatched mouse events carried the widget-relative position as the
+screen position (screenX == clientX). A page can compare
+event.screenX - event.clientX against window.screenX / window.screenY and
+flag the mismatch as soon as the browser window sits anywhere but the
+screen origin - a trivially scriptable automation fingerprint. Real OS
+input always satisfies screenX == clientX + window content origin, so
+convert via the view bounds exactly like the touch dispatch path already
+does (ConvertWidgetPointToScreenPoint). Applied in
+InputHandler::HandleMouseEvent so both InputHandler::DispatchMouseEvent
+and the InputInjector drag flow are covered; the method already
+guarantees widget_host->GetView() is non-null.
+
+diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browser/devtools/protocol/input_handler.cc
+index 9364acb..972bc82 100644
+--- a/content/browser/devtools/protocol/input_handler.cc
++++ b/content/browser/devtools/protocol/input_handler.cc
+@@ -1402,6 +1402,14 @@ void InputHandler::HandleMouseEvent(
+     return;
+   }
+ 
++  // Use real screen coordinates: CDP-dispatched mouse events previously carried the
++  // widget position as the screen position (screenX == clientX), which contradicts
++  // the page-visible window.screenX / window.screenY once the browser window sits
++  // anywhere but the screen origin, a detectable automation fingerprint. Mirrors the
++  // touch dispatch path, which already converts via ConvertWidgetPointToScreenPoint.
++  event->SetPositionInScreen(ConvertWidgetPointToScreenPoint(
++      CHECK_DEREF(widget_host->GetView()), event->PositionInWidget()));
++
+   auto findWidgetAndDispatchEvent = base::BindOnce(
+       [](base::WeakPtr<InputHandler> self,
+          base::WeakPtr<RenderWidgetHostImpl> widget_host,
